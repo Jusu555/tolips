@@ -1,0 +1,391 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Pink Tulips</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+/* Layout: one centered column. Title block, the growing bouquet as the hero, one control row, a short note. Single dark look by choice, like a terminal at night. */
+:root{
+  --bg:#08070a;
+  --panel:#0d0b10;
+  --fg:#efe9dc;
+  --muted:#9a93a0;
+  --line:#2b252f;
+  --accent:#ff6fae;
+  --display:'Instrument Serif',Georgia,'Times New Roman',serif;
+  --mono:'DM Mono',ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  background:var(--bg);
+  color:var(--fg);
+  font-family:var(--mono);
+  font-size:14px;
+  line-height:1.6;
+  padding-block:28px 44px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+.wrap{max-width:600px;margin:0 auto;display:flex;flex-direction:column;gap:20px;min-width:0}
+h1{
+  font-family:var(--display);
+  font-weight:400;
+  font-size:clamp(2.6rem,10vw,4rem);
+  line-height:.98;
+  margin:0;
+  text-wrap:balance;
+}
+h1 em{color:var(--accent);font-style:italic}
+.sub{margin:0;color:var(--muted);max-width:46ch}
+.stage{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:4px;
+  padding:10px;
+  min-width:0;
+}
+canvas{display:block;width:100%;height:auto;touch-action:pan-y}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.seg{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+button{
+  font:inherit;
+  color:var(--fg);
+  background:transparent;
+  border:0;
+  min-height:44px;
+  padding:0 16px;
+  cursor:pointer;
+  letter-spacing:.04em;
+}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#2a0516}
+.act{border:1px solid var(--accent);border-radius:4px;color:var(--accent)}
+.act:hover{background:var(--accent);color:#2a0516}
+button:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.meta{
+  display:flex;flex-wrap:wrap;gap:6px 18px;
+  color:var(--muted);font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+}
+.meta b{color:var(--fg);font-weight:500;white-space:pre}
+p.note{margin:0;color:var(--muted);max-width:52ch}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Pink Tulips <em>for you!</em></h1>
+  </header>
+
+  <div class="stage">
+    <canvas id="c" role="img" aria-label="Pink tulips drawn from text characters growing from green sprouts into open blooms on a dark background"></canvas>
+  </div>
+
+  <div class="controls">
+    <button id="replay" class="act" type="button">Watch them grow again</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var COLS = 88, ROWS = 66;
+  var W = COLS, H = ROWS * 2;           // painting space: a cell is twice as tall as wide
+  var RAMP = " .:-=+*#%@";
+  var SNIPPET = "for(let k=0;k<petals.length;k++){const[x,y]=petals[k];if(x<xmin)xmin=x;if(x>xmax)xmax=x;if(y<ymin)ymin=y;if(y>ymax)ymax=y;maxw=Math.max(maxw,w[k]);} ";
+  var SYMS = "{}();=<>[]+";
+  var BG = "#08070a";
+  var BASE_Y = 126;
+
+  var PINKS = [
+    {c:"#a0155a", m:"#e8479a", e:"#ffb3d9", v:"#ffe0f0"},
+    {c:"#c2386e", m:"#f27aaa", e:"#ffd1e3", v:"#fff0f6"},
+    {c:"#7e1050", m:"#d6308a", e:"#ff9ccf", v:"#ffc9e6"},
+    {c:"#d96a96", m:"#ffa6c6", e:"#ffe3ee", v:"#ffffff"},
+    {c:"#b01e7a", m:"#ee55b8", e:"#ffc0ea", v:"#ffe0f5"}
+  ];
+  var G1 = "#2f8a2c", G2 = "#59b244", G3 = "#9fe070";
+
+  var off = document.createElement("canvas");
+  off.width = COLS; off.height = ROWS;
+  var octx = off.getContext("2d", {willReadFrequently:true});
+  var cv = document.getElementById("c");
+  var ctx = cv.getContext("2d");
+
+
+  function rng(a){
+    return function(){
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function clamp(x){ return x < 0 ? 0 : x > 1 ? 1 : x; }
+  function ease(x){ x = clamp(x); return x * x * (3 - 2 * x); }
+  function rgb(h){ return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
+  function mix(a, b, k){
+    var A = rgb(a), B = rgb(b);
+    return "rgb(" + Math.round(A[0] + (B[0] - A[0]) * k) + "," + Math.round(A[1] + (B[1] - A[1]) * k) + "," + Math.round(A[2] + (B[2] - A[2]) * k) + ")";
+  }
+
+  // x, y = where the stem tip ends up; size scale
+  var SPOTS = [
+    [45,20,1.0],[33,27,.95],[57,26,.95],[22,38,.9],[68,37,.9],
+    [40,40,1.0],[51,42,1.0],[29,53,.9],[62,53,.9],[45,57,.95],[15,57,.8]
+  ];
+  var LEAVES = [
+    [-2.3,54,-.9,6.5],[-.84,54,.9,6.5],[-1.95,62,-.5,6],[-1.19,62,.5,6],
+    [-2.75,42,-.7,5],[-.4,42,.7,5],[-1.57,52,.12,5.5]
+  ];
+
+  var seed = 7, bouquet, leaves, stars;
+  function makeBouquet(s){
+    var r = rng(s * 9973 + 13);
+    bouquet = SPOTS.map(function(p, i){
+      var x = p[0] + (r() - .5) * 5, y = p[1] + (r() - .5) * 5;
+      return {
+        x: x, y: y, s: p[2] * (.92 + r() * .18),
+        bx: 45 + (x - 45) * .1,
+        bow: (r() - .5) * 9,
+        pal: PINKS[Math.floor(r() * PINKS.length)],
+        ph: r() * 6.283,
+        ds: .3 + r() * 1.9,
+        dur: 3.2 + r() * 1.2,
+        bd: r() * .8
+      };
+    });
+    leaves = LEAVES.map(function(l, i){
+      return {a: l[0] + (r() - .5) * .12, len: l[1] * (.92 + r() * .16), curv: l[2], w: l[3], ds: .2 + i * .28, dur: 3.6, ph: r() * 6.283};
+    });
+    stars = [];
+    for(var i = 0; i < 80; i++) stars.push({x: r() * W, y: r() * H, ph: r() * 6.283});
+  }
+
+  function curve(f, u, t, wind){
+    var sway = Math.sin(t * .9 + f.ph) * 1.0 + wind * 3 * (BASE_Y - f.y) / 100;
+    var p0x = f.bx, p0y = BASE_Y;
+    var p2x = f.x + sway, p2y = f.y;
+    var p1x = (p0x + p2x) / 2 + f.bow, p1y = p0y + (p2y - p0y) * .55;
+    var a = 1 - u;
+    return {
+      x: a * a * p0x + 2 * a * u * p1x + u * u * p2x,
+      y: a * a * p0y + 2 * a * u * p1y + u * u * p2y,
+      dx: 2 * a * (p1x - p0x) + 2 * u * (p2x - p1x),
+      dy: 2 * a * (p1y - p0y) + 2 * u * (p2y - p1y)
+    };
+  }
+
+  function leaf(L, gt, t, wind){
+    var gr = ease((gt - L.ds) / L.dur);
+    if(gr <= 0.01) return;
+    var N = 14, px = 45, py = BASE_Y, pts = [];
+    var sway = Math.sin(t * .8 + L.ph) * .05 + wind * .06 * (L.curv > 0 ? 1 : -1) * 0 + wind * .05;
+    for(var i = 0; i <= N; i++){
+      var u = i / N;
+      pts.push([px, py, u]);
+      var a = L.a + sway + L.curv * u * gr;
+      px += Math.cos(a) * L.len * gr / N;
+      py += Math.sin(a) * L.len * gr / N;
+    }
+    var left = [], right = [];
+    for(i = 0; i < pts.length; i++){
+      var p = pts[i], q = pts[Math.min(i + 1, pts.length - 1)], o = pts[Math.max(i - 1, 0)];
+      var dx = q[0] - o[0], dy = q[1] - o[1], d = Math.sqrt(dx * dx + dy * dy) || 1;
+      var wdt = L.w * Math.pow(Math.sin(Math.PI * Math.pow(p[2], .75)), .9) * (.4 + .6 * gr);
+      left.push([p[0] - dy / d * wdt, p[1] + dx / d * wdt]);
+      right.push([p[0] + dy / d * wdt, p[1] - dx / d * wdt]);
+    }
+    var g = octx.createLinearGradient(45, BASE_Y, px, py);
+    g.addColorStop(0, G1); g.addColorStop(1, G3);
+    octx.fillStyle = g;
+    octx.beginPath();
+    octx.moveTo(left[0][0], left[0][1]);
+    for(i = 1; i < left.length; i++) octx.lineTo(left[i][0], left[i][1]);
+    for(i = right.length - 1; i >= 0; i--) octx.lineTo(right[i][0], right[i][1]);
+    octx.closePath();
+    octx.fill();
+    octx.strokeStyle = "#c9f59a";
+    octx.lineWidth = .6;
+    octx.beginPath();
+    octx.moveTo(pts[0][0], pts[0][1]);
+    for(i = 1; i < pts.length - 1; i++) octx.lineTo(pts[i][0], pts[i][1]);
+    octx.stroke();
+  }
+
+  function tpetal(h, w, rot, cols, col, vein){
+    octx.save();
+    octx.rotate(rot);
+    var g = octx.createLinearGradient(0, 0, 0, -h);
+    g.addColorStop(0, mix(G1, cols[0], col));
+    g.addColorStop(.45, mix(G2, cols[1], col));
+    g.addColorStop(1, mix(G3, cols[2], col));
+    octx.fillStyle = g;
+    octx.beginPath();
+    octx.moveTo(0, 0);
+    octx.bezierCurveTo(w * 1.2, -h * .08, w * 1.05, -h * .72, 0, -h);
+    octx.bezierCurveTo(-w * 1.05, -h * .72, -w * 1.2, -h * .08, 0, 0);
+    octx.fill();
+    if(vein){
+      octx.strokeStyle = vein;
+      octx.globalAlpha = .55 * col;
+      octx.lineWidth = .7;
+      octx.beginPath(); octx.moveTo(0, -h * .1); octx.lineTo(0, -h * .88); octx.stroke();
+      octx.lineWidth = .45;
+      octx.beginPath();
+      octx.moveTo(0, -h * .3); octx.lineTo(w * .55, -h * .5);
+      octx.moveTo(0, -h * .3); octx.lineTo(-w * .55, -h * .5);
+      octx.stroke();
+      octx.globalAlpha = 1;
+    }
+    octx.restore();
+  }
+
+  function head(f, g, o, ang){
+    var sz = (.25 + .45 * g) + .3 * o;
+    var h = 22 * f.s * sz, w = 9 * f.s * sz;
+    var col = clamp((g - .5) / .45);
+    var P = f.pal;
+    octx.save();
+    octx.translate(f.tx, f.ty);
+    octx.rotate(ang);
+    var spread = .1 + .6 * o;
+    tpetal(h * 1.03, w * .95, -spread, [P.c, P.c, P.m], col, null);
+    tpetal(h * 1.03, w * .95, spread, [P.c, P.c, P.m], col, null);
+    if(o > .3){
+      octx.fillStyle = "#5a0f36";
+      octx.globalAlpha = clamp((o - .3) / .5);
+      octx.beginPath();
+      octx.ellipse(0, -h * .32, w * .55 * o, h * .28, 0, 0, 6.283);
+      octx.fill();
+      octx.globalAlpha = 1;
+      octx.fillStyle = "#f6d36a";
+      octx.fillRect(-.8, -h * .42, 1.6, 1.6);
+      octx.fillRect(-w * .3 * o, -h * .36, 1.2, 1.2);
+      octx.fillRect(w * .3 * o - 1, -h * .36, 1.2, 1.2);
+    }
+    tpetal(h * .98, w * .9, -spread * .45, [P.c, P.m, P.e], col, P.v);
+    tpetal(h * .98, w * .9, spread * .45, [P.c, P.m, P.e], col, P.v);
+    tpetal(h, w, 0, [P.m, P.e, P.e], col, P.v);
+    octx.restore();
+  }
+
+  function scene(t, gt, wind){
+    octx.setTransform(1, 0, 0, 1, 0, 0);
+    octx.fillStyle = "#000";
+    octx.fillRect(0, 0, COLS, ROWS);
+    octx.setTransform(1, 0, 0, .5, 0, 0);
+
+    stars.forEach(function(s){
+      var a = .3 + .7 * Math.max(0, Math.sin(t * 1.6 + s.ph));
+      octx.fillStyle = "rgba(255,238,205," + (a * .85).toFixed(2) + ")";
+      octx.fillRect(Math.floor(s.x), Math.floor(s.y / 2) * 2, 1, 2);
+    });
+
+    octx.lineCap = "round";
+    octx.lineJoin = "round";
+
+    bouquet.forEach(function(f, i){
+      var g = ease((gt - f.ds) / f.dur);
+      f.g = g;
+      var open = f.ds + f.dur * .85 + f.bd;
+      f.o = ease((gt - open) / 2.6);
+      if(g <= 0.005) return;
+      var steps = 18, k, c;
+      octx.strokeStyle = i % 2 ? "#47ad3a" : "#37953a";
+      octx.lineWidth = 2.2;
+      octx.beginPath();
+      for(k = 0; k <= steps; k++){
+        c = curve(f, g * k / steps, t, wind);
+        if(k) octx.lineTo(c.x, c.y); else octx.moveTo(c.x, c.y);
+      }
+      octx.stroke();
+      c = curve(f, g, t, wind);
+      f.tx = c.x; f.ty = c.y;
+      f.ang = Math.atan2(c.dx, -c.dy);
+    });
+
+    leaves.forEach(function(L){ leaf(L, gt, t, wind); });
+
+    bouquet.forEach(function(f){
+      if(f.g > .2) head(f, f.g, f.o, f.ang);
+    });
+  }
+
+  var mode = "shade";
+  function paint(){
+    var data = octx.getImageData(0, 0, COLS, ROWS).data;
+    var cw = cv.width / COLS, chh = cv.height / ROWS;
+    ctx.fillStyle = BG;
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.font = "500 " + Math.max(4, Math.min(cw / .6, chh * .9)).toFixed(1) + "px 'DM Mono',ui-monospace,Menlo,Consolas,monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    var row, col, i, r, g, b, lum, ch, k;
+    for(row = 0; row < ROWS; row++){
+      for(col = 0; col < COLS; col++){
+        i = (row * COLS + col) * 4;
+        r = data[i]; g = data[i + 1]; b = data[i + 2];
+        lum = .299 * r + .587 * g + .114 * b;
+        if(lum < 14) continue;
+        if(mode === "shade"){
+          ch = RAMP.charAt(Math.min(RAMP.length - 1, Math.floor(lum / 256 * RAMP.length) + 1));
+          k = 1.3;
+        } else {
+          ch = SNIPPET.charAt((row * COLS + col) % SNIPPET.length);
+          if(ch === " ") ch = SYMS.charAt((row * 7 + col * 3) % SYMS.length);
+          k = .75 + lum / 255 * .8;
+        }
+        ctx.fillStyle = "rgb(" + Math.min(255, r * k | 0) + "," + Math.min(255, g * k | 0) + "," + Math.min(255, b * k | 0) + ")";
+        ctx.fillText(ch, (col + .5) * cw, (row + .5) * chh + chh * .04);
+      }
+    }
+  }
+
+  var wind = 0, windT = 0, t0 = performance.now(), gStart = t0, last = 0, stageLabel = "";
+  var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function growT(){ return still ? 99 : (performance.now() - gStart) / 1000; }
+  function render(){
+    var t = (performance.now() - t0) / 1000, gt = growT();
+    scene(t, gt, wind);
+    paint();
+  }
+
+  function size(){
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var cssW = cv.clientWidth || 360;
+    var cssH = cssW * (ROWS * 2) / COLS;
+    cv.style.height = cssH + "px";
+    cv.width = Math.round(cssW * dpr);
+    cv.height = Math.round(cssH * dpr);
+  }
+
+  function frame(now){
+    if(now - last >= 45){
+      last = now;
+      wind += (windT - wind) * .08;
+      render();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  cv.addEventListener("pointermove", function(e){
+    var b = cv.getBoundingClientRect();
+    windT = ((e.clientX - b.left) / b.width - .5) * 2;
+    if(still){ wind = windT; render(); }
+  });
+  cv.addEventListener("pointerleave", function(){ windT = 0; if(still){ wind = 0; render(); } });
+  window.addEventListener("resize", function(){ size(); render(); });
+
+  function replay(){ gStart = performance.now(); render(); }
+  document.getElementById("replay").addEventListener("click", replay);
+
+
+  makeBouquet(seed);
+  size();
+  gStart = performance.now();
+  render();
+  if(!still) requestAnimationFrame(frame);
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ render(); });
+})();
+</script>
+
+</body></html>
